@@ -241,6 +241,14 @@ For starters lets look at the last two lines (**51-52**). If you look at the bin
 
 So, that leaves us with only 3 lines! We're close. If you comment **line 49** and run the code you'll see the chessboard patter but it won't move. That's because if you remember `BP` register has the 'time'. So this basically displaces the whole pattern. So, we can ignore ir for now. All the magic happens in lines **48** and **50**.
 
+@TODO: Read the 'Applications' section of [Wikipedia entry of XOR](https://en.wikipedia.org/wiki/XOR_gate) and the 'Computer Science' section of [Wikipedia article on Exclusive Or boolean.](https://en.wikipedia.org/wiki/Exclusive_or)
+
+In particular understand this:
+
+![What is this? Seem like what we are looking at](imgs/xor.png)
+
+And this article on [Nimber or Grundy Numbers](https://en.wikipedia.org/wiki/Nimber)
+
 ## Appendix 1: the 8086 and its architecture
 
 I'll write more notes here as I dive into the code. First some reminder of the registers in the 8086/80256 to understand a bit the listing:
