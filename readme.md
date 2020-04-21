@@ -1,12 +1,14 @@
 # Analysis of Revision'2020 PC 256 byte intro winner "Memories" by HellMood / DESiRE
 
+**Update** Hellmood has be kind enough to just release [this long article on the demo](http://sizecoding.org/wiki/Memories). Still this article may have some value and it is a lot of fun write to nail down the little details. 4/20/20
+
 **20 April 2020**
 
 It's that time of the year again: **Revision 2020 party**. The past weekend (Easter weekend) the Coronavirus has forced the demo party to be remote which meant we get to experience it as a first class citizen from the other end of the world (Argentina 🇦🇷). One of my favorite categories is the **PC 256 byte intro**. I'm always amazed at what smart people can accomplish with limited resources. This year's winner is, in my opinion incredible so I though I needed to have a deep look into how it worked. 
 
 The intro is called *"Memories"* and you can find it here: [Pouet](https://www.pouet.net/prod.php?which=85227). You can also watch the [video in YouTube](https://www.youtube.com/watch?v=Imquk_3oFf4). If you download the code you'll notice that the author was kind enough to provide the source code! This is really important and great in my opinion because it allows people to study it and learn from it. Surprisingly this doesn't seem to be the norm although I see that more and more people are releasing their source code or at least the shaders are shared via [ShaderToy](https://www.shadertoy.com/).
 
-The result of my investigations is this article. It's quite long and is a work in progress. Even though the main idea of the code is easy to grasp each effect is its own world and the code is full of subtelties.
+The result of my investigations is this article. It's quite long and is a work in progress. Even though the main idea of the code is easy to grasp each effect is its own world and the code is full of subtelties. 
 
 ## Pre-requisites
 
@@ -144,12 +146,13 @@ This code is the main part of the demo and gets looped continuously to calculate
 - **`BP`** this is a 'time' variable that is increased every time the timer function is called. This register is used by the shaders to change  with time. We'll see more later.
 - **`ES`** the extra segment is fixed at `0xA000` which is the start segment of the VGA RAM. Not modified again.
 
-Now lets have a look at this code a bit. Now we have some pretty sneaky code here.
+Now lets have a look at this code a bit. Now we have some pretty subtle code here.
 
 - **lines 25-26** This code is pretty important and it took me a while to figure what it was doing. These two lines simply takes the content of `DI` (the offset to the current pixel we are looking at) and multiplies it by the 'magic' number `0xCCCD`. Since we are multiplying two 16 bit number the result is a 32 bit number which is stored in `DX:AX`. The low 16 bits will be overriden in the next lines so let's forget about it. But the value of `DX` **is** used by the shaders and it's important to understand what it stores. This took me a night to figure out but I think I have a better idea. Have a look at Appendix 3 to see how it's calculated.
 - **lines 28-36** This code takes the low 16 bits of the previous multiplication and does some magic to it. See Appendix 3 to understand the details but the end result is that the low 8 bits of `AX` (`AL`) has a number between 0 - 0xF. If you think of this as a function of `DI` it basically has an almost fixed number for a while and as the `DI` increases it starts oscillating between that value and the next until it finally settles to the next value. This is used to switch between shaders. So, the sequence looks something like this (as a function of time): 
 
 `0 0 0 0 0 ... 0 0 1 0 0 1 0 0 1 0 0 ... 1 1 1 0 1 1 1 0 1  ... 1 1 1 1 1 1 ... 1 1 1 1 2 1 ...` 
+
 - **lines 38 - 46** The register `AX` is copied onto `BX` and will be used as the location of the shader to call for the curren pixel. The value of `AL` is basically an offset into the array of shaders stored in lines 61-62. Once we have in `BX` the address of the 'shader' responsible for calculating the color of the current pixel line 41 calls it and lines 43-46 store the pixel on the screen, increase DI by 3 (not sure why we need it to be 3. As long as its odd the result is the same.)
 - **lines 48 - 58** This code sets the 'counter divisor' to make the interrupt trigger more often (quicker) or slower. 
 - **lines 53 - 58** poll the keyboard and if the user hits ESC exits otherwise it goes back to `top:` and the continues.
@@ -267,38 +270,140 @@ We can ignore **line 49** (`BP=0`). What determines which of the 4 colors we get
 
 ## Effect: Circles Zooming
 
+```
+  1 %define circles_pattern 8+16
+  2
+  3 fx1:
+  4 	mov al, dh
+  5 	sub al, 100
+  6 	imul al
+  7 	xchg dx, ax
+  8 	imul al
+  9 	add dh, ah
+ 10 	mov al, dh
+ 11 	add ax, bp
+ 12 	and al, circles_pattern
+ret
+```
+
 Pending.
 
 ## Effect: Tilted plane scrolling
 
+```
+  1 fx0: ; tilted plane, scrolling
+  2 	mov ax,0x1329
+  3 	add dh,al
+  4 	div dh
+  5 	xchg dx,ax
+  6 	imul dl
+  7 	sub dx,bp
+  8 	xor ah,dl
+  9 	mov al,ah
+ 10 	and al,tilt_plate_pattern
+ 11 ret
+
+```
 Pending.
 
 ## Effect: Parallax checkerboards
 
+```
+  1 fx3: ; parallax checkerboards
+  2 	mov cx,bp
+  3 	mov bx,-16
+  4 fx3L:
+  5 	add cx,di
+  6 	mov ax,819
+  7 	imul cx	 
+  8 	ror dx,1	 
+  9 	inc bx	 
+ 10 	ja fx3L
+ 11 	lea ax,[bx+31]	 
+ 12 ret
+```
 Pending.
 
 ## Effect: Sierpinski rotozoomer
 
+```
+  1 fx4: ; sierpinski rotozoomer	
+  2 	lea cx,[bp-2048]
+  3     sal cx,3
+  4 	movzx ax,dh
+  5 	movsx dx,dl
+  6 	mov bx,ax
+  7 	imul bx,cx
+  8 	add bh,dl
+  9 	imul dx,cx
+ 10 	sub al,dh
+ 11 	and al,bh
+ 12 	and al,0b11111100
+ 13 	salc				; VERY slow on dosbox, but ok
+ 14 	jnz fx4q
+ 15 	mov al,sierp_color
+ 16 	fx4q:
+ 17 ret
+```
 Pending.
 
 ## Effect: Raycast bent tunnel
 
+```
+  1 fx5: ; raycast bent tunnel
+  2 	mov cl,-9
+  3 	fx5L: 
+  4 	push dx
+  5 		mov al,dh
+  6 		sub al,100
+  7 		imul cl
+  8 		xchg ax,dx	
+  9 		add al,cl
+ 10 		imul cl
+ 11 		mov al,dh
+ 12 		xor al,ah
+ 13 		add al,4
+ 14 		test al,-8
+ 15 	pop dx
+ 11 	loopz fx5L
+ 17 	sub cx,bp
+ 18 	xor al,cl
+ 19 	aam tunnel_pattern; VERY slow on dosbox, but ok
+ 10 	add al,tunnel_base_color
+ 21 ret
+```
 Pending.
 
 ## Effect: Ocean night / to day sky
 
+```
+  1 fx6: ; ocean night / to day sky
+  2 	sub dh,120
+  3 	js fx6q
+  4 	mov [bx+si],dx
+  5 	fild word [bx+si]
+  6 	fidivr dword [bx+si]
+  7 	fstp dword [bx+si-1]
+  8 	mov ax,[bx+si]
+  9 	add ax,bp
+ 10 	and al,128
+ 11 	dec ax
+ 12 fx6q:
+ 13 ret
+```
 Pending.
 
 ## About the Author
 
-![Cesar Miquel](imgs/me.jpg?1)
 Cesar Miquel has been involved with computers since he got his first computer in the 1980′s. He's gone from programming assembly language for the 6809 and 6502 processors, writting C and C++ code for industrial applications, running numerical simulations to web development. Since 1995 he has been mostly using open source software.
 
 Currently he is a partner at [Easytech](https://easytechgreen.com), an Argentinian based company involved in developing web based applications and sites for the enterprise. There he currently leads the development team involved in developing enterprise web applications and sites.
 
 He also holds a PHD in Physics from the University of Buenos Aires were he has done research in quantum computers. He has several publications in scientific journals including one in Nature.
 
-You can find me: [Twitter](https://twitter.com/cesarmiquel) / [Instagram](https://www.instagram.com/cesarmiquel) / [Tumblr](https://hypro.tumblr.com/) / [LinkedIN](https://www.linkedin.com/in/cesarmiquel/)
+You can find me: [Twitter](https://twitter.com/cesarmiquel) / [Instagram](https://www.instagram.com/cesarmiquel) / [Tumblr](https://hypro.tumblr.com/) / [LinkedIn](https://www.linkedin.com/in/cesarmiquel/) / [Easytechgreen](https://easytechgreen.com)
+
+![Cesar Miquel](imgs/me.jpg?1)
 
 ## Appendix 1: the 8086 and its architecture
 
@@ -330,6 +435,8 @@ For some of the things I needed the RGB colors of all 256 colors. Since I couldn
 ## Apendix 3: Jupyter notebook
 
 This **Jupyter** notebook will be useful to understand some of the ideas behind each of the different effects that appear in the demo. We'll start by looking at the values of the `DX` registers that is used in all effects. Then we'll go over each individual effect and try to explore the math that goes behind it.
+
+The notebook is under the folder `notebook/` and you can download it here: [memories-notebook.ipynb](notebook/memories-notebook.ipynb).
 
 ## Analyzing the contents of DX
 
