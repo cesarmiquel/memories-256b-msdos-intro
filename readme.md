@@ -270,9 +270,26 @@ We can ignore **line 49** (`BP=0`). What determines which of the 4 colors we get
 
 ## Effect: Circles Zooming
 
+To understand how this effect works we need to dive into a bit more details I've skipped so far. Again, the secret is de content of the `DX` register. One of the things I hadn't been cleared is that if you look at the initialization of the `ES` register you'll notice that its not initialized at `0xA000` which is the start of the first line. Its initialized to `0xA000 - 0x10`. Since thats a segment address thats exactly `0x80` bytes *before* the start of VGA RAM. So the first row we are really drawing the second half of it because the first half will never be seen. The following graph shows how the memory is layed out and what values the `x` and `y` value take. The table lists for each value of `DI` what is the content of `DH` (*y* coordinate) and `DL` (*x* coordinate).
+
+![Screem memory and DX register](imgs/vga-memory-layout.png)
+
+The effect is basically a group of concentric circles centerd at coordinate (100,160). The equation of circle centerd in coordinate `x0`, `y0` is:
+
 ```
-  1 %define circles_pattern 8+16
-  2
+(x-x0)² + (y-y0)² = R²
+```
+
+If you look at the table you'll notice that *x=0* happens for `DI=140` so the equation of a circle in this coordinate space is:
+
+
+```
+(x)² + (y-y0)² = R²
+```
+
+That means that all coordinates *x,y* that fall on a circle will have a fixed value. We use this fixed value (R²) will correspond to a color. If we limit the palette we'll get the effect we see in the demo. Let's look at the source code:
+
+```
   3 fx1:
   4 	mov al, dh
   5 	sub al, 100
@@ -286,7 +303,7 @@ We can ignore **line 49** (`BP=0`). What determines which of the 4 colors we get
 ret
 ```
 
-Pending.
+**lines 4-5** copies the content of the *y* coordinate (`DH`) -> `AL`, we substract 100 (*y0*) and then we multiplay by itself to get *(y-y0)²*. **Line 7** saves the value of `AX` -> `DX`. And leaves the *x* coordinate in `AL`. **Line 8** multiplies by itself and stores in `AX` so `Ax = AL * AL`. One important point is that `imul` performs a **signed** multiplication.
 
 ## Effect: Tilted plane scrolling
 
@@ -438,6 +455,10 @@ This **Jupyter** notebook will be useful to understand some of the ideas behind 
 
 The notebook is under the folder `notebook/` and you can download it here: [memories-notebook.ipynb](notebook/memories-notebook.ipynb).
 
+# Jupyter notebook to analyze the different effects used in the demo
+
+This **Jupyter** notebook will be useful to understand some of the ideas behind each of the different effects that appear in the demo. We'll start by looking at the values of the `DX` registers that is used in all effects. Then we'll go over each individual effect and try to explore the math that goes behind it.
+
 ## Analyzing the contents of DX
 
 In the program, all the effects use the `DX` register which is pre-loaded when the loop starts with the high word of the result of multiplying the `DI` register with the *magic number* `0xcccd`. To understand why the author uses this number we need to dig a bit into this bit of code:
@@ -472,7 +493,7 @@ for di in range(0, n, 1):
 
     # mov ax, 0xcccd
     # mul di
-    m = di * 0xcccd
+    m = (di+160) * 0xcccd
     dx = (m & 0xffff0000) >> 16
     dx = dx & 0xffff
     ax = (m & 0xffff)
@@ -492,7 +513,7 @@ plt.plot(result_dl[offset:offset+700])
 plt.title("DL register as a functoin of DI")
 
 plt.subplot(1,2,2)
-plt.plot(result_dl[offset:offset+30])
+plt.plot(result_dl[offset:offset+16])
 plt.title("DL register as a functoin of DI (detail)")
 
 plt.show()
@@ -516,10 +537,10 @@ plt.show()
 So we see the following important properties:
 
 1. Both functions have a period of **320** which is the width of the screen.
-2. In the case of `DL` we see its a sawtooth with period 320. The values go from 0 to 255. Since there are only 256 possible values and the function reaches its maximum when `DI` is 320 then some values must repeat. If you look closely this can be seen.
-3. In the case of `DH` we see that its an increasing function which basically adds 1 after 320 bytes.
+2. In the case of `DH` we see that its an increasing function which basically adds 1 after 320 bytes. So, in effect this is basically the *y* coordinate of the pixel at `DI`.
+3. In the case of `DL` we see its a sawtooth with period 320. The values go from 0 to 255. Since there are only 256 possible values and the function reaches its maximum when `DI` is 320 then some values must repeat. If you look closely this can be seen. You can think of this as the *x* coordinate except that instead of going up to 319 it goes up to 255.
 
-These properties of `DX` will be used in each one of the effects in the demo.
+After HellMood published his article this is what he calls the ["Rrrola trick"](http://www.sizecoding.org/wiki/General_Coding_Tricks#Obtaining_X_and_Y_without_DIV_.28The_Rrrola_Trick.29). In this way you can get an estimate to *y*,*x* without the need to divide and move the results around which require more bytes
 
 ## Board of Chessboards effect
 
@@ -608,19 +629,48 @@ These should start to look familiar.
 
 To study a bit more we can write the effect as Python code. I've named all my variables with the name of the corresponding register. You'll notice that often I need to do an AND (&) operation with `0xFF` or `0xFFFF` to make sure the variable doesn't exceed the corresponding register size. I've commented each section of code with the corrresponding part of the orginal assembler effect.
 
+We'll need to read the VGA palette values to use from here on. Let's read the palette froma Git repo I have with a CSV of all the colors and display the first 64 colors:
+
+
+```python
+# Read VGA palette: the row number is the index into the array and the first 3 columns are the RGB values
+vga_palette = np.genfromtxt('https://gist.githubusercontent.com/cesarmiquel/1780ab6078b9735371d1f10a9d60d233/raw/fb1ab3d46c81f1d43a11838f82cde8df767568d7/vga-palette.csv', delimiter=',')
+
+rgb = []
+numrows = 16
+for color in range(0, 16 * numrows):
+    rgb_pixel = vga_palette[ color ]
+    rgb.append(int(rgb_pixel[0]))
+    rgb.append(int(rgb_pixel[1]))
+    rgb.append(int(rgb_pixel[2]))
+
+rgb_m = np.array(rgb)
+rgb_m.shape = (numrows, 16, 3)
+
+plt.figure(figsize=(8,8))
+plt.imshow(rgb_m, interpolation='none',origin='upper' )
+plt.axis("off")
+plt.show()
+```
+
+
+![png](imgs/output_15_0.png?1)
+
+
 
 ```python
 # ---------------------------------------------------------
 # This code simulates the effect
 # ---------------------------------------------------------
 vga_memory = []
-bp = 0x13                # you can change bp manually to see what happens
+
+bp = 0                # you can change bp manually to see what happens
 
 for di in range(0, 0xffff + 1):
 
     # mov ax, 0xcccd
     # mul di
-    m = di * 0xcccd
+    m =  di * 0xcccd
     dx = (m & 0xffff0000) >> 16
     dx = dx & 0xffff
     
@@ -631,7 +681,7 @@ for di in range(0, 0xffff + 1):
     # sub ax, bp
     ax = ax - bp
     
-    # xor al, ah
+    # xor al, ah     ; calculate x XOR y
     al = 0xff & ax
     ah = (0xff00 & ax) >> 8
     al = al ^ ah 
@@ -650,38 +700,144 @@ for di in range(0, 0xffff + 1):
 
     
 # Plot the contents of VGA RAM with correct colors
-bits = np.mat(vga_memory[0:320*200])
+bits = np.mat(vga_memory[160:320*200+160])
 bits = bits.reshape(200, 320)
-
-# Convert to RGB
-palette = {
-     14:[255, 255,  85], # 0xE
-     18:[ 32,  32,  32], # 0x12
-    238:[ 53,  65,  45], # 0xEE
-    242:[ 45,  65,  63], # 0xF2
-}
 
 rgb = []
 for row in range(0, 200):
     for col in range(0, 320):
-        #print "%d, %d" % (row, col)
-        #rgb.append = palette[ bits[row,col] ]
-        rgb_pixel = palette[ bits[row,col] ]
-        rgb.append(rgb_pixel[0])
-        rgb.append(rgb_pixel[1])
-        rgb.append(rgb_pixel[2])
+        rgb_pixel = vga_palette[ bits[row, col] ]
+        rgb.append(int(rgb_pixel[0]))
+        rgb.append(int(rgb_pixel[1]))
+        rgb.append(int(rgb_pixel[2]))
 
 rgb_m = np.array(rgb)
 rgb_m.shape = (200, 320, 3)
 
-plt.figure(figsize=(10,10))
+plt.figure(figsize=(16,16))
+plt.imshow(rgb_m, interpolation='none',origin='lower' )
+plt.xticks([0,320],['0', '320'])
+plt.yticks([0,00],['0', '200'])
+#plt.axis("off")
+plt.show()
+```
+
+
+![png](imgs/output_16_0.png)
+
+
+## Zooming circles effect
+
+```
+	mov al,dh		; get Y in AL
+	sub al,100		; align Y vertically
+	imul al			; AL = Y²
+	xchg dx,ax		; Y²/256 in DH, X in AL
+	imul al			; AL = X²
+	add dh,ah		; DH = (X² + Y²)/256
+	mov al,dh		; AL = (X² + Y²)/256
+	add ax,bp		; offset color by time
+	and al,8+16		; select special rings
+``` 
+
+
+```python
+# ---------------------------------------------------------
+# This code simulates the effect
+# ---------------------------------------------------------
+
+# Simulate signed 8 bit multiplation
+# for two signed bytes as input and 16 bit out
+def imul8(a, b):
+    if a > 0x80:
+        a = a - 0x100
+    if b > 0x80:
+        b = b - 0x100
+    return (a * b) & 0xffff
+
+vga_memory = []
+bp         = 0                # you can change bp manually to see what happens
+
+for di in range(0, 0xffff + 1):
+    
+    # mov ax, 0xcccd
+    # mul di
+    m = di * 0xcccd
+    dx = (m & 0xffff0000) >> 16
+    ax = (m & 0xffff)
+
+    dl = dx & 0xff
+    dh = (dx & 0xff00) >> 8
+    al = ax & 0xff
+    ah = (ax & 0xff00) >> 8
+    
+    # Start of effect code ------------------------------------
+    # mov al, dh
+    al = dh
+
+    # sub al, 100
+    al = (al - 100)
+
+    # imul al
+    ax = imul8(al, al)
+    
+    # xchg dx, ax
+    temp = dx
+    dx = ax
+    ax = temp
+    
+    dl = dx & 0xff
+    dh = (dx & 0xff00) >> 8
+    al = ax & 0xff
+    ah = (ax & 0xff00) >> 8
+
+    # imul al
+    ax = imul8(al, al)
+    al = ax & 0xff
+    ah = (ax & 0xff00) >> 8
+    
+    # add dh, ah
+    dh = (dh + ah) & 0xff
+    
+    # mov al,dh     ; AL = (X² + Y²)/256
+    al = dh
+    
+    # add ax,bp     ; offset color by time
+    ax = (ah << 8) + al + bp
+    ax = ax & 0xffff
+    al = (ax & 0xff)
+    
+    # and al,8+16   ; select special rings
+    al = al & 0b00011000
+
+    # End of effect code ---------------------------------------
+    
+    # Save byte to Video RAM
+    vga_memory.append(al)
+    
+# Plot the contents of VGA RAM with correct colors
+bits = np.mat(vga_memory[160:320*200+160])
+bits = bits.reshape(200, 320)
+
+rgb = []
+for row in range(0, 200):
+    for col in range(0, 320):
+        rgb_pixel = vga_palette[ bits[row, col] ]
+        rgb.append(int(rgb_pixel[0]))
+        rgb.append(int(rgb_pixel[1]))
+        rgb.append(int(rgb_pixel[2]))
+
+rgb_m = np.array(rgb)
+rgb_m.shape = (200, 320, 3)
+
+plt.figure(figsize=(16,16))
 plt.imshow(rgb_m, interpolation='none',origin='upper' )
 plt.xticks([0,320],['0', '320'])
 plt.yticks([0,200],['0', '200'])
 plt.axis("off")
 plt.show()
+
 ```
 
 
-![png](imgs/output_15_0.png)
-
+![png](imgs/output_18_0.png)
