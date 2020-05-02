@@ -303,7 +303,7 @@ That means that all coordinates *x,y* that fall on a circle will have a fixed va
 ret
 ```
 
-**lines 4-5** copies the content of the *y* coordinate (`DH`) -> `AL`, we substract 100 (*y0*) and then we multiplay by itself to get *(y-y0)²*. **Line 7** saves the value of `AX` -> `DX`. And leaves the *x* coordinate in `AL`. **Line 8** multiplies by itself and stores in `AX` so `Ax = AL * AL`. One important point is that `imul` performs a **signed** multiplication.
+**lines 4-5** copies the content of the *y* coordinate (`DH`) -> `AL`, we substract 100 (*y0*) and then we multiplay by itself to get *(y-y0)²*. **Line 7** saves the value of `AX` -> `DX`. And leaves the *x* coordinate in `AL`. **Line 8** multiplies by itself and stores in `AX` so `Ax = AL * AL`. One important point is that `imul` performs a **signed** multiplication. Let's understand this with a couple of examples. If you have `AL = 0x20` (32 in decimal notation) for example, then `imul al` would yield `ax = 0x400`. Nothing strange here. Now let's see what happens if `al = 0xf0` (240 decimal). A regular multiplication would yield `ax = E100` (57600 decimal) but the `imul` instruction interprets `0xf0 = - 0x10` and so `-0x10 * -0x10 = 0x100` and therefore returns a **totally** different result.
 
 ## Effect: Tilted plane scrolling
 
@@ -654,7 +654,7 @@ plt.show()
 ```
 
 
-![png](imgs/output_15_0.png?1)
+![png](imgs/output_15_0.png)
 
 
 
@@ -841,3 +841,21 @@ plt.show()
 
 
 ![png](imgs/output_18_0.png)
+
+
+An important thing to notice is the use of `imul` instead of the regular multiplication opcode `mul`. Below we plot the result of doing `x*2` when `x` goes from `0` to `0xff` and on the same plot we show the result of doing `imul x`.  
+
+
+```python
+result = []
+for a in range(0, 0xff):
+    result.append([a*a, imul8(a,a)])
+plt.plot(result)
+plt.xticks([0,128,255],['0', '0x80', '0xff'])
+plt.yticks([0,0x4000, 0x8000, 0xc000, 0xffff],['0', '0x4000', '0x8000', '0xc000', '0xffff'])
+plt.show()
+```
+
+
+![png](imgs/output_20_0.png)
+
